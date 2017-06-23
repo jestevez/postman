@@ -101,21 +101,44 @@
                                         <div class="col-lg-12">
                                             <?php
                                             $request = $sub_item["request"]; //solicitud
-                                            $uri = $request["url"]; // url
+                                            $uri = (is_array($request["url"]) ? $request["url"]["raw"] : $request["url"]); // url
                                             $description = $request["description"]; // descripcion del endpoint
                                             ?>
                                             <h3>Descripción</h3>
                                             <p class="text-muted"><?php echo $request["description"]; ?></p>
                                             <h3>URI</h3>
-                                            <code><?php echo $request["url"]; ?></code>
-
-
-
+                                            <code><?php echo $uri; ?></code>
+                                            <h3>Method</h3>
+                                            <code><?php echo $request["method"]; ?></code>
+                                            
 
                                             <h3>Datos de Entrada</h3>
-                                            <p><?php $headers = $request["header"]; ?></p>
-                                            <?php if (!empty($headers)): ?>
+                                            <?php $bodyForm = $request["body"]; ?>
+                                            <p></p>
+                                            <?php if (!empty($bodyForm)): ?>
+                                                <?php if($bodyForm["mode"] === 'formdata'): ?>
+                                                <p>formdata</p>
+                                                <?php $formdata = $bodyForm["formdata"]?>
+                                                <table class="table table-bordered table-striped">
+                                                    <?php foreach ($formdata as $body): ?>
 
+                                                        <tr>
+                                                            <th><?php echo ($body["key"]); ?></th>
+                                                            <td><?php echo ($body["value"]); ?></td>
+                                                        </tr>
+
+                                                    <?php endforeach; ?>
+                                                </table>
+                                                <?php elseif($bodyForm["mode"] === 'raw'): ?>
+                                                    <p>raw</p>
+                                                    <pre><code  class="hljs json"><?php echo $request["body"]["raw"]; ?></code></pre>
+                                                <?php endif; ?>
+                                                
+                                            <?php endif; ?>
+                                            <?php $headers = $request["header"]; ?>
+                                            <p></p>
+                                            <?php if (!empty($headers)): ?>
+                                                <p>headers</p>
                                                 <table class="table table-bordered table-striped">
                                                     <?php foreach ($headers as $header): ?>
 
@@ -127,8 +150,125 @@
                                                     <?php endforeach; ?>
                                                 </table>
                                             <?php endif; ?>
-                                            <pre><code  class="hljs json"><?php echo $request["body"]["raw"]; ?></code></pre>
+                                            
+                                            
+                                            
+                                            
                                         
+
+<?php
+
+$curlNL = " \\\n";
+$curl = "curl -X ".$request["method"];
+$curl = $curl.$curlNL." '".($uri)."'";
+$curlHeaders = "";
+$javaHeaders = "";
+if (!empty($headers)) {
+    foreach ($headers as $header) {
+        $curlHeaders .= $curlNL."-H '".$header["key"].": ".$header["value"]."'";
+        $javaHeaders .= '                    .header("'.$header["key"].'", "'.$header["value"].'")
+';
+    }   
+}
+$curlRaw = "";
+$curlBody = "";
+$javaBody = "";
+$javaRawParam = "";
+$javaRaw = "";
+$javaPayloadObj = "";
+$javaPayload = "";
+if (!empty($bodyForm)) {
+    if($bodyForm["mode"] === 'formdata') {
+        $formdata = $bodyForm["formdata"];
+        foreach ($formdata as $body) {
+            $curlBody .= $curlNL."-F '".$body["key"]."'='".$body["value"]."'";
+            $javaBody .= '            form.param("'.$body["key"].'", "'.$body["value"].'");
+';
+        }
+
+        if(!empty($javaBody)) {
+            $javaPayloadObj = "payload";
+            $javaPayload = "            Entity<Form> payload = Entity.entity(form, MediaType.APPLICATION_FORM_URLENCODED);";
+            $javaBody = '            Form form = new Form();
+        '.$javaBody;
+        }
+        
+    } elseif($bodyForm["mode"] === 'raw') {
+        $curlRaw =  $curlNL."-d '".$request["body"]["raw"]."'"; 
+        $javaRawParam = "ObjectInput objectInput";
+        $javaRaw = "            Entity<ObjectInput> payload = Entity.entity(objectInput, MediaType.APPLICATION_JSON);";
+        $javaPayloadObj = "payload";
+    }
+}
+
+
+$curl = $curl . $curlHeaders .$curlBody.$curlRaw;
+
+// $item["name"]
+// $sub_item["name"] 
+
+$jaxrs ='import javax.ws.rs.client.*;
+import javax.ws.rs.core.*;
+import java.io.IOException;
+
+public class ExampleEndpointClass {
+    public ObjectOutput exampleMethod('.$javaRawParam.') {
+            Client client = ClientBuilder.newClient();
+'.$javaPayload.$javaRaw.'
+'.$javaBody.'
+            String endpoint = "'.$uri.'";
+
+            Response response = client.target(endpoint)
+                    .request(MediaType.WILDCARD)
+'.$javaHeaders.'
+                    .'.  strtolower($request["method"]).'('.$javaPayloadObj.');
+            String json = response.readEntity(String.class);
+            ObjectMapper mapper = new ObjectMapper();
+            ObjectOutput output = null;
+            if (response.getStatus() == 200) {
+                try {
+                    output = mapper.readValue(json, ObjectOutput.class);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+            client.close();
+
+            return output;
+        }
+}
+';
+?>                                                    
+                                            <h3>Codigo</h3>
+                                            <div>
+                                                <ul class="nav nav-tabs" role="tablist">
+                                                        <li role="presentation" class="active">
+                                                            <a href="#curl-<?php echo md5($sub_item."@".$uri) ?>" data-toggle="tab" aria-expanded="false">
+                                                            cURL
+                                                            </a>
+                                                        </li>   
+
+                                                         <li role="presentation" class="">
+                                                            <a href="#java-<?php echo md5($sub_item."@".$uri) ?>" data-toggle="tab" aria-expanded="false">
+                                                            Java (jaxrs-client)
+                                                            </a>
+                                                        </li>   
+                                                </ul>
+                                                <div class="tab-content">
+                 
+                                                    <div class="tab-pane active" id="curl-<?php echo md5($sub_item."@".$uri) ?>">
+                                                        <pre><code  class="hljs bash"><?php echo $curl ?></code></pre>
+                                                    </div>
+                                                    <div class="tab-pane " id="java-<?php echo md5($sub_item."@".$uri) ?>">
+                                                        <pre><code  class="hljs java"><?php echo $jaxrs ?></code></pre>
+                                                    </div>
+
+                                                </div>
+                                            </div>
+                                            
+                                             
+
+
                                             <?php $responses = $sub_item["response"]; //respuestas     ?>
                                             <?php if (!empty($responses)): ?>
                                             <h3>Respuetas</h3>
@@ -170,7 +310,6 @@
                                         
                                     <p></p>
                                     
-
                                     
                                                        
                                     
